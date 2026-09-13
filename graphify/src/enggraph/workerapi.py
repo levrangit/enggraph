@@ -32,7 +32,16 @@ from psycopg2.extensions import cursor as Cursor
 from psycopg2.pool import ThreadedConnectionPool
 from pydantic import BaseModel, Field
 
-from enggraph import bootstrap, embedjobs, features, indexjobs, jobs, schedule, sources
+from enggraph import (
+    bootstrap,
+    embedjobs,
+    features,
+    indexjobs,
+    jobs,
+    schedule,
+    serverstate,
+    sources,
+)
 from enggraph.config import (
     EMBED_CHUNK_CHARS,
     EMBED_LOOP_ENABLED,
@@ -457,6 +466,7 @@ def embedding_summary(cursor: Cursor, project: str) -> dict[str, Any]:
         "origin": settled.origins[features.ENABLED],
         "server_url": settled.server_url,
         "urls": candidates(settled.server_url),
+        "server": serverstate.read(FEATURE_EMBEDDING, primary(settled.server_url)),
         "batch": settled.batch,
         "tick_seconds": settled.tick_seconds,
         "budget_seconds": settled.budget_seconds,
@@ -539,6 +549,7 @@ def summary_summary(cursor: Cursor, project: str) -> dict[str, Any]:
     """Return what one project's summaries amount to, as a listing shows it."""
     settled = features.resolve(cursor, project, FEATURE_SUMMARIZE)
     open_job = jobs.running_job(cursor, project)
+    dialled = next(iter(chat_candidates(settled.server_url)), "")
     return {
         "project": project,
         "allowed": settled.allowed,
@@ -551,7 +562,8 @@ def summary_summary(cursor: Cursor, project: str) -> dict[str, Any]:
         "budget_seconds": settled.budget_seconds,
         "chunk_chars": settled.chunk_chars,
         "chunk_overlap": settled.chunk_overlap,
-        "pushed": bool(chat_candidates(settled.server_url)),
+        "pushed": bool(dialled),
+        "server": serverstate.read(FEATURE_SUMMARIZE, dialled),
         "job": None if open_job is None else int(open_job["id"]),
         "queue": jobs.queue_depth(cursor, project),
         **key_summary(settled),

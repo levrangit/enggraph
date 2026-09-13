@@ -18,6 +18,7 @@ import logging
 import time
 import urllib.error
 
+from enggraph import serverstate
 from enggraph.config import (
     EMBED_DIM,
     EMBED_LOCAL_URL,
@@ -28,11 +29,18 @@ from enggraph.config import (
     EMBED_QUEUE_TIMEOUTS,
     EMBED_SERVER_KEY,
     EMBED_SERVER_URL,
+    FEATURE_EMBEDDING,
     Timeouts,
 )
 from enggraph.dial import Unreachable, request_json
 
 LOG = logging.getLogger(__name__)
+
+
+def _saw(url: str, reason: str = "") -> None:
+    """Tell the dashboard's lamps what this address just did."""
+    serverstate.record(FEATURE_EMBEDDING, url, reason)
+
 
 # Addresses a query could not connect to, skipped until the time stored: with
 # the primary down and no local server, a search must not wait on either.
@@ -196,8 +204,10 @@ class Embedder:
                 # A refused token is not an address that did not answer: the
                 # server is there, and trying the next one hides the remedy.
                 if error.code == 401:
+                    _saw(url, "refused the token (401)")
                     raise EmbedError(refused_key(url)) from None
                 if error.code in INPUT_REFUSALS:
+                    _saw(url)
                     raise EmbedRejected(
                         f"{url} refused this input ({error.code}): {detail_of(error)}"
                     ) from None
@@ -216,17 +226,20 @@ class Embedder:
                     f"{url} did not finish {len(texts)} chunk(s): {error}"
                 ) from None
             except Unreachable as error:
+                _saw(url, f"does not answer: {error}")
                 if self.for_query:
                     _UNREACHABLE[url] = time.monotonic() + self.probe_seconds
                 LOG.debug("embedding server %s is unreachable (%s)", url, error)
                 tried.append(url)
                 continue
             except OSError as error:
+                _saw(url, f"does not answer: {error}")
                 LOG.debug("embedding server %s did not answer (%s)", url, error)
                 tried.append(url)
                 continue
             vectors = read_vectors(answer, len(texts))
             self._check_width(url, vectors[0])
+            _saw(url)
             if self.chosen != url or self._down:
                 LOG.info("Embedding through %s as %s", url, self.model)
             self.chosen = url
@@ -244,6 +257,7 @@ class Embedder:
         if detail:
             note = f"{note}: {detail}"
         self.refusals[url] = note
+        _saw(url, note)
         if url not in self._reported:
             self._reported.add(url)
             LOG.info("%s", note)
@@ -270,6 +284,7 @@ class Embedder:
             "(--embeddings --pooling mean), or migrate the column."
         )
         self.refusals[url] = note
+        _saw(url, note)
         raise EmbedError(note)
 
     def why(self, tried: list[str]) -> str:

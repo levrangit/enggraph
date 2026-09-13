@@ -19,8 +19,10 @@ import time
 import urllib.error
 from typing import Any
 
+from enggraph import serverstate
 from enggraph.config import (
     CHAT_TIMEOUTS,
+    FEATURE_SUMMARIZE,
     PROBE_TIMEOUTS,
     SUMMARIZE_PROBE_SECONDS,
     SUMMARIZE_SERVER_KEY,
@@ -30,6 +32,12 @@ from enggraph.config import (
 from enggraph.dial import request_json
 
 LOG = logging.getLogger(__name__)
+
+
+def _saw(url: str, reason: str = "") -> None:
+    """Tell the dashboard's lamps what this address just did."""
+    serverstate.record(FEATURE_SUMMARIZE, url, reason)
+
 
 CHAT_PATH = "/v1/chat/completions"
 PROPS_PATH = "/props"
@@ -121,14 +129,18 @@ class Chat:
                 answer = call(f"{url}{PROPS_PATH}", None, PROBE_TIMEOUTS, self.key)
             except urllib.error.HTTPError as error:
                 if error.code == 401:
+                    _saw(url, "refused the token (401)")
                     raise ChatError(refused_key(url)) from None
+                _saw(url, f"answered {error.code} to {PROPS_PATH}")
                 LOG.debug("chat server %s answered %s", url, error.code)
                 tried.append(url)
                 continue
             except OSError as error:
+                _saw(url, f"does not answer: {error}")
                 LOG.debug("chat server %s did not answer (%s)", url, error)
                 tried.append(url)
                 continue
+            _saw(url)
             settings = answer.get("default_generation_settings") or {}
             self.n_ctx = int(settings.get("n_ctx") or answer.get("n_ctx") or 0)
             self.model = str(answer.get("model_path") or "").split("/")[-1]
@@ -155,18 +167,23 @@ class Chat:
                 # A refused token is not an address that did not answer: the
                 # server is there, and trying the next one hides the remedy.
                 if error.code == 401:
+                    _saw(url, "refused the token (401)")
                     raise ChatError(refused_key(url)) from None
                 if error.code in INPUT_REFUSALS:
+                    _saw(url)
                     raise ChatRejected(
                         f"{url} refused this prompt ({error.code})"
                     ) from None
+                _saw(url, f"answered {error.code} to {CHAT_PATH}")
                 LOG.debug("chat server %s answered %s", url, error.code)
                 tried.append(url)
                 continue
             except OSError as error:
+                _saw(url, f"does not answer: {error}")
                 LOG.debug("chat server %s did not answer (%s)", url, error)
                 tried.append(url)
                 continue
+            _saw(url)
             choices = answer.get("choices") or []
             if not choices:
                 raise ChatError(f"no choices in the answer: {str(answer)[:200]}")
