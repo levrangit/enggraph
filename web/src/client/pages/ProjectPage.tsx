@@ -22,6 +22,7 @@ import { GraphFrame } from "../components/GraphFrame.js";
 import { IndexButton } from "../components/IndexButton.js";
 import { NodeBrowser } from "../components/NodeBrowser.js";
 import { FailuresTab, NotProcessed } from "../components/NotProcessed.js";
+import { QueueLamps } from "../components/StatusLamps.js";
 import { isBuiltin, PROJECT_TYPES } from "./ProjectsPage.js";
 import { SettingsTab } from "./SettingsTab.js";
 import { useApi, useDebounced } from "../hooks/useApi.js";
@@ -116,6 +117,7 @@ export function ProjectPage() {
     <>
       <div className="row">
         <h1>{project.name}</h1>
+        <QueueLamps project={project.name} />
         {!isBuiltin(project) && (
           <button type="button" onClick={() => setRenaming(true)}>
             Rename

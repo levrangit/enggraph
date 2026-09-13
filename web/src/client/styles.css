@@ -71,6 +71,74 @@ header a.active {
   border-bottom: 2px solid var(--accent);
 }
 
+.lamps {
+  display: flex;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+.row .lamps {
+  margin-left: 0;
+}
+
+.lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.lamp-dot {
+  display: inline-block;
+  flex: none;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.lamp-ok .lamp-dot {
+  background: var(--fresh);
+  box-shadow: 0 0 0.35rem var(--fresh);
+}
+
+.lamp-down .lamp-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0.35rem var(--danger);
+}
+
+.lamp-down {
+  color: var(--danger);
+}
+
+.server-state {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.25rem 0;
+}
+
+input.unsaved,
+select.unsaved,
+textarea.unsaved {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger);
+}
+
+span.unsaved {
+  border-radius: 999px;
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+
+.unsaved-note {
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
 main {
   max-width: 1200px;
   margin: 0 auto;

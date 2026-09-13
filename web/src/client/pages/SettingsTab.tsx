@@ -10,10 +10,12 @@ import {
   Spinner,
   minutes,
 } from "../components/Common.js";
-import { FeatureEditor } from "../components/FeatureFields.js";
+import { FeatureEditor, UnsavedNote } from "../components/FeatureFields.js";
 import { IndexingEditor } from "../components/IndexingFields.js";
 import { NotProcessed } from "../components/NotProcessed.js";
+import { LAMP_REFRESH_MS, ServerLines } from "../components/StatusLamps.js";
 import { useApi } from "../hooks/useApi.js";
+import { unsaved, useDraft } from "../hooks/useDraft.js";
 import type {
   EmbeddingsView,
   FileType,
@@ -54,8 +56,8 @@ export function SettingsTab({
   );
   // Every project's embedding state in one call, as the API answers it; the
   // row for this one is what the section below reports.
-  const embeddings = useApi<EmbeddingsView>("/embeddings");
-  const summaries = useApi<SummariesView>("/summaries");
+  const embeddings = useApi<EmbeddingsView>("/embeddings", LAMP_REFRESH_MS);
+  const summaries = useApi<SummariesView>("/summaries", LAMP_REFRESH_MS);
   const summaryRow = summaries.data?.summaries.find(
     (one) => one.project === project,
   );
@@ -99,7 +101,6 @@ export function SettingsTab({
       <h2>Indexing</h2>
       {schedule.data !== null && <Effective schedule={schedule.data} />}
       <IndexingEditor
-        key={`project-${own?.updated_at ?? "none"}`}
         path={`${path}/indexing`}
         indexing={own?.settings?.indexing}
         feature={own?.settings?.indexing}
@@ -117,6 +118,7 @@ export function SettingsTab({
         Whether a file of this project may be described by a model, and the
         server that answers. Empty inherits the address from the level above.
       </p>
+      <ServerLines rows={summaries.data?.summaries} project={project} />
       {(summaryRow?.skipped ?? 0) > 0 && (
         <p className="token-expired">
           Not processed:
@@ -129,7 +131,6 @@ export function SettingsTab({
         </p>
       )}
       <FeatureEditor
-        key={`summarize-${own?.updated_at ?? "none"}`}
         path={`${path}/features/summarize`}
         probePath="/summaries/probe"
         feature={own?.settings?.summarize}
@@ -137,11 +138,13 @@ export function SettingsTab({
         onSaved={() => {
           settings.reload();
           featured.reload();
+          summaries.reload();
         }}
       />
 
       <h2>Embedding</h2>
       <EmbeddingProgress project={project} view={embeddings.data} />
+      <ServerLines rows={embeddings.data?.embeddings} project={project} />
       {(embeddingRow?.skipped ?? 0) > 0 && (
         <p className="token-expired">
           Not processed:
@@ -154,7 +157,6 @@ export function SettingsTab({
         </p>
       )}
       <FeatureEditor
-        key={`embedding-${own?.updated_at ?? "none"}`}
         path={`${path}/features/embedding`}
         probePath="/embeddings/probe"
         feature={own?.settings?.embedding}
@@ -303,12 +305,14 @@ function Level({
   origins: (string | null)[];
   onSaved: () => void;
 }) {
-  const [keep, setKeep] = useState(level?.ctxkeep ?? "");
-  const [ignore, setIgnore] = useState(level?.ctxignore ?? "");
+  const path = `/projects/${encodeURIComponent(project)}`;
+  const draft = useDraft(`${path}/selection`, {
+    ctxkeep: level?.ctxkeep ?? "",
+    ctxignore: level?.ctxignore ?? "",
+  });
   const [report, setReport] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const path = `/projects/${encodeURIComponent(project)}`;
   const shadowed = origins.includes("file");
 
   async function run(work: () => Promise<void>) {
@@ -347,17 +351,21 @@ function Level({
         <label>
           ctxkeep - what becomes a node. Empty falls back to the level above.
           <textarea
-            value={keep}
+            className={unsaved(undefined, draft.isDirty("ctxkeep"))}
+            value={draft.value.ctxkeep}
             rows={16}
-            onChange={(event) => setKeep(event.target.value)}
+            onChange={(event) => draft.update({ ctxkeep: event.target.value })}
           />
         </label>
         <label>
           ctxignore - what is pruned, on top of the built-in skip list.
           <textarea
-            value={ignore}
+            className={unsaved(undefined, draft.isDirty("ctxignore"))}
+            value={draft.value.ctxignore}
             rows={16}
-            onChange={(event) => setIgnore(event.target.value)}
+            onChange={(event) =>
+              draft.update({ ctxignore: event.target.value })
+            }
           />
         </label>
       </div>
@@ -376,8 +384,10 @@ function Level({
           onClick={() =>
             void run(async () => {
               const proposed = await post<ScanResult>(`${path}/scan`, {});
-              setKeep(proposed.ctxkeep);
-              setIgnore(proposed.ctxignore);
+              draft.update({
+                ctxkeep: proposed.ctxkeep,
+                ctxignore: proposed.ctxignore,
+              });
               setReport(proposed.report);
             })
           }
@@ -391,8 +401,7 @@ function Level({
           onClick={() =>
             void run(async () => {
               await remove(`${path}/settings`);
-              setKeep("");
-              setIgnore("");
+              draft.discard();
               setReport(null);
               onSaved();
             })
@@ -406,15 +415,21 @@ function Level({
           onClick={() =>
             void run(async () => {
               await put(`${path}/settings`, {
-                ctxkeep: keep,
-                ctxignore: ignore,
+                ctxkeep: draft.value.ctxkeep,
+                ctxignore: draft.value.ctxignore,
               });
+              draft.commit();
               onSaved();
             })
           }
         >
           Save
         </button>
+        <UnsavedNote
+          count={draft.dirtyCount}
+          disabled={busy}
+          onDiscard={draft.discard}
+        />
       </div>
     </div>
   );

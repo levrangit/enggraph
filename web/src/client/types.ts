@@ -175,6 +175,15 @@ export type ProjectFeatures = {
   features: Record<string, FeatureState>;
 };
 
+// What the last request to one server did, as the worker API remembers it.
+export type ServerState = {
+  url: string;
+  state: "ok" | "down" | "unknown";
+  reason: string;
+  since: string | null;
+  checked_at: string | null;
+};
+
 // What a project's vectors amount to, and how much is still queued.
 export type EmbeddingState = {
   project: string;
@@ -183,6 +192,7 @@ export type EmbeddingState = {
   gated: boolean;
   origin: string;
   server_url: string;
+  server: ServerState;
   key_set: boolean;
   key_expired: boolean;
   urls: string[];
@@ -197,6 +207,7 @@ export type EmbeddingState = {
 // What one project's summaries amount to, and how much is still queued.
 export type SummaryState = {
   project: string;
+  server: ServerState;
   allowed: boolean;
   enabled: boolean;
   gated: boolean;

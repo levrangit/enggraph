@@ -1,7 +1,9 @@
 import { useState } from "react";
 
 import { put } from "../api.js";
+import { unsaved, useDraft } from "../hooks/useDraft.js";
 import { ErrorBox } from "./Common.js";
+import { UnsavedNote } from "./FeatureFields.js";
 import { Switch } from "./Switch.js";
 import type {
   Feature,
@@ -31,6 +33,11 @@ export type IndexingDraft = {
   debounce: string;
 };
 
+type IndexingEdit = IndexingDraft & {
+  enabled: boolean | null;
+  allowed: boolean;
+};
+
 export function draftOf(indexing: Indexing | undefined): IndexingDraft {
   return {
     mode: indexing?.mode ?? "",
@@ -55,6 +62,7 @@ export function IndexingFields({
   onChange,
   root = false,
   settled,
+  dirty,
 }: {
   draft: IndexingDraft;
   onChange: (draft: IndexingDraft) => void;
@@ -62,15 +70,19 @@ export function IndexingFields({
   // What these fields come to once every level is folded in. Shown as the
   // placeholder, because a box saying "default" answers nothing.
   settled?: ScheduleSummary;
+  dirty?: (field: keyof IndexingDraft) => boolean;
 }) {
   const empty = root ? BUILT_IN : INHERIT;
   const inForce = (value: number | undefined) =>
     value === undefined ? (root ? "default" : "inherit") : String(value);
+  const mark = (field: keyof IndexingDraft) =>
+    unsaved(undefined, dirty?.(field) ?? false);
   return (
     <div className="filters">
       <label>
         When it indexes
         <select
+          className={mark("mode")}
           value={draft.mode}
           onChange={(event) => onChange({ ...draft, mode: event.target.value })}
         >
@@ -88,6 +100,7 @@ export function IndexingFields({
           type="number"
           min={1}
           max={10080}
+          className={mark("interval")}
           placeholder={inForce(settled?.interval_minutes)}
           value={draft.interval}
           onChange={(event) =>
@@ -101,6 +114,7 @@ export function IndexingFields({
           type="number"
           min={1}
           max={1440}
+          className={mark("debounce")}
           placeholder={inForce(settled?.debounce_minutes)}
           value={draft.debounce}
           onChange={(event) =>
@@ -139,16 +153,17 @@ export function IndexingEditor({
   onSaved: () => void;
   root?: boolean;
 }) {
-  const [draft, setDraft] = useState<IndexingDraft>(draftOf(indexing));
-  const [enabled, setEnabled] = useState<boolean | null>(
-    feature?.enabled ?? null,
-  );
-  const [allowed, setAllowed] = useState<boolean>(feature?.allowed ?? true);
+  const draft = useDraft<IndexingEdit>(path, {
+    ...draftOf(indexing),
+    enabled: feature?.enabled ?? null,
+    allowed: feature?.allowed ?? true,
+  });
+  const value = draft.value;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const inherited = enabled === null;
-  const shown = enabled ?? settled?.enabled ?? true;
+  const inherited = value.enabled === null;
+  const shown = value.enabled ?? settled?.enabled ?? true;
   const gated = settled?.allowed === false && !root;
 
   /** Clear this level rather than storing an empty answer, as above. */
@@ -157,9 +172,7 @@ export function IndexingEditor({
     setError(null);
     try {
       await put(path, {});
-      setDraft(EMPTY);
-      setEnabled(null);
-      setAllowed(true);
+      draft.discard();
       onSaved();
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -168,16 +181,19 @@ export function IndexingEditor({
     }
   }
 
-  async function save(value: IndexingDraft, switched: boolean | null) {
+  async function save() {
     setBusy(true);
     setError(null);
     try {
       // One request, not two: the switch lives in the same settings object as
       // the schedule, and that object is replaced rather than merged - so a
       // second write would drop whatever the first one had just stored.
-      await put(path, { ...bodyOf(value), enabled: switched, allowed });
-      setDraft(value);
-      setEnabled(switched);
+      await put(path, {
+        ...bodyOf(value),
+        enabled: value.enabled,
+        allowed: value.allowed,
+      });
+      draft.commit();
       onSaved();
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -191,39 +207,44 @@ export function IndexingEditor({
       {error !== null && <ErrorBox message={error} />}
       <div className="feature-row">
         {root && (
-          <Switch
-            checked={allowed}
-            label={allowed ? "enabled" : "disabled"}
-            title="whether anything may index a project without being asked"
-            onChange={setAllowed}
-          />
+          <span className={unsaved(undefined, draft.isDirty("allowed"))}>
+            <Switch
+              checked={value.allowed}
+              label={value.allowed ? "enabled" : "disabled"}
+              title="whether anything may index a project without being asked"
+              onChange={(checked) => draft.update({ allowed: checked })}
+            />
+          </span>
         )}
-        <Switch
-          checked={shown}
-          inherited={inherited && !root}
-          disabled={gated}
-          label={
-            gated
-              ? "disabled globally"
-              : inherited && !root
-                ? `inherited: ${shown ? "on" : "off"}`
-                : `status: ${shown ? "on" : "off"}`
-          }
-          title={
-            gated
-              ? "indexing is disabled, so this level is not asked at all"
-              : root
-                ? "what a project that says nothing about itself does"
-                : "whether anything indexes this without being asked"
-          }
-          onChange={setEnabled}
-        />
+        <span className={unsaved(undefined, draft.isDirty("enabled"))}>
+          <Switch
+            checked={shown}
+            inherited={inherited && !root}
+            disabled={gated}
+            label={
+              gated
+                ? "disabled globally"
+                : inherited && !root
+                  ? `inherited: ${shown ? "on" : "off"}`
+                  : `status: ${shown ? "on" : "off"}`
+            }
+            title={
+              gated
+                ? "indexing is disabled, so this level is not asked at all"
+                : root
+                  ? "what a project that says nothing about itself does"
+                  : "whether anything indexes this without being asked"
+            }
+            onChange={(checked) => draft.update({ enabled: checked })}
+          />
+        </span>
       </div>
       <IndexingFields
-        draft={draft}
-        onChange={setDraft}
+        draft={value}
+        onChange={(next) => draft.update(next)}
         root={root}
         settled={schedule}
+        dirty={draft.isDirty}
       />
       <div className="row">
         <button
@@ -234,13 +255,14 @@ export function IndexingEditor({
         >
           {root ? "Back to the built-in defaults" : "Inherit everything"}
         </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void save(draft, enabled)}
-        >
+        <button type="button" disabled={busy} onClick={() => void save()}>
           Save
         </button>
+        <UnsavedNote
+          count={draft.dirtyCount}
+          disabled={busy}
+          onDiscard={draft.discard}
+        />
       </div>
     </>
   );

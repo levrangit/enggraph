@@ -1,11 +1,18 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { put } from "../api.js";
 import { ErrorBox, Spinner } from "../components/Common.js";
-import { FeatureEditor } from "../components/FeatureFields.js";
+import { FeatureEditor, UnsavedNote } from "../components/FeatureFields.js";
 import { IndexingEditor } from "../components/IndexingFields.js";
+import { LAMP_REFRESH_MS, ServerLines } from "../components/StatusLamps.js";
 import { useApi } from "../hooks/useApi.js";
-import type { ProjectFeatures, SettingsLevel } from "../types.js";
+import { unsaved, useDraft } from "../hooks/useDraft.js";
+import type {
+  EmbeddingsView,
+  ProjectFeatures,
+  SettingsLevel,
+  SummariesView,
+} from "../types.js";
 
 /** The selection every project falls back to.
  *
@@ -14,35 +21,43 @@ import type { ProjectFeatures, SettingsLevel } from "../types.js";
  * Left empty, the fallback is the built-in set of file types the parsers know.
  */
 export function SettingsPage() {
-  const { data, error, loading, reload } = useApi<SettingsLevel>("/settings");
+  const { data, error, reload } = useApi<SettingsLevel>("/settings");
   // What the global level comes to once the built-in defaults are folded in.
   // Every field below shows it as its placeholder.
   const settled = useApi<ProjectFeatures>("/settings/features");
-  const [keep, setKeep] = useState<string | null>(null);
-  const [ignore, setIgnore] = useState<string | null>(null);
+  const embeddings = useApi<EmbeddingsView>("/embeddings", LAMP_REFRESH_MS);
+  const summaries = useApi<SummariesView>("/summaries", LAMP_REFRESH_MS);
+  const selection = useDraft("/settings/selection", {
+    ctxkeep: data?.ctxkeep ?? "",
+    ctxignore: data?.ctxignore ?? "",
+  });
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-
-  // The editors start from what is stored, and stop tracking it once typed in.
-  useEffect(() => {
-    if (data !== null) {
-      setKeep((current) => current ?? data.ctxkeep ?? "");
-      setIgnore((current) => current ?? data.ctxignore ?? "");
-    }
-  }, [data]);
 
   if (error !== null) {
     return <ErrorBox message={error} />;
   }
-  if (loading || data === null || keep === null || ignore === null) {
+  // Only the first load: a reload keeps the page, and what is typed on it.
+  if (data === null) {
     return <Spinner what="the defaults" />;
+  }
+
+  function reloadAll() {
+    reload();
+    settled.reload();
+    embeddings.reload();
+    summaries.reload();
   }
 
   async function save() {
     setSaving(true);
     setFailure(null);
     try {
-      await put("/settings", { ctxkeep: keep, ctxignore: ignore });
+      await put("/settings", {
+        ctxkeep: selection.value.ctxkeep,
+        ctxignore: selection.value.ctxignore,
+      });
+      selection.commit();
       reload();
     } catch (reason: unknown) {
       setFailure(reason instanceof Error ? reason.message : String(reason));
@@ -76,7 +91,7 @@ export function SettingsPage() {
         indexing={data.settings?.indexing}
         feature={data.settings?.indexing}
         settled={settled.data?.features.indexing}
-        onSaved={reload}
+        onSaved={reloadAll}
       />
 
       <h2>Summarizing</h2>
@@ -86,13 +101,14 @@ export function SettingsPage() {
         on its own; with none, `make summarize` and a remote worker are what
         drain it. Off here stops all three.
       </p>
+      <ServerLines rows={summaries.data?.summaries} />
       <FeatureEditor
         root
         path="/settings/features/summarize"
         settled={settled.data?.features.summarize}
         probePath="/summaries/probe"
         feature={data.settings?.summarize}
-        onSaved={reload}
+        onSaved={reloadAll}
       />
 
       <h2>Embedding</h2>
@@ -103,13 +119,14 @@ export function SettingsPage() {
         with <code>make up EMBED=1</code> - or <code>EMBED_SERVER_URL</code>
         when that is set.
       </p>
+      <ServerLines rows={embeddings.data?.embeddings} />
       <FeatureEditor
         root
         path="/settings/features/embedding"
         settled={settled.data?.features.embedding}
         probePath="/embeddings/probe"
         feature={data.settings?.embedding}
-        onSaved={reload}
+        onSaved={reloadAll}
       />
 
       <h2>Selection</h2>
@@ -124,17 +141,23 @@ export function SettingsPage() {
         <label>
           ctxkeep - what becomes a node
           <textarea
-            value={keep}
+            className={unsaved(undefined, selection.isDirty("ctxkeep"))}
+            value={selection.value.ctxkeep}
             rows={20}
-            onChange={(event) => setKeep(event.target.value)}
+            onChange={(event) =>
+              selection.update({ ctxkeep: event.target.value })
+            }
           />
         </label>
         <label>
           ctxignore - what is pruned, on top of the built-in skip list
           <textarea
-            value={ignore}
+            className={unsaved(undefined, selection.isDirty("ctxignore"))}
+            value={selection.value.ctxignore}
             rows={20}
-            onChange={(event) => setIgnore(event.target.value)}
+            onChange={(event) =>
+              selection.update({ ctxignore: event.target.value })
+            }
           />
         </label>
       </div>
@@ -148,6 +171,11 @@ export function SettingsPage() {
         <button type="button" disabled={saving} onClick={() => void save()}>
           Save
         </button>
+        <UnsavedNote
+          count={selection.dirtyCount}
+          disabled={saving}
+          onDiscard={selection.discard}
+        />
       </div>
     </>
   );

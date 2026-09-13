@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { post, put } from "../api.js";
+import { unsaved, useDraft } from "../hooks/useDraft.js";
 import { ErrorBox } from "./Common.js";
 import { Switch } from "./Switch.js";
 import type { Feature, FeatureState, InheritedFeature } from "../types.js";
@@ -25,6 +26,9 @@ export type FeatureDraft = {
   // a browser, so this is what replaces one rather than what shows it.
   key: string;
 };
+
+// Never written to sessionStorage.
+const SECRET: readonly (keyof FeatureDraft)[] = ["key"];
 
 export function draftOf(feature: Feature | undefined): FeatureDraft {
   return {
@@ -105,6 +109,34 @@ export const EMPTY: FeatureDraft = {
   key: "",
 };
 
+/** How many fields differ from what is stored, and the way back to it. */
+export function UnsavedNote({
+  count,
+  disabled = false,
+  onDiscard,
+}: {
+  count: number;
+  disabled?: boolean;
+  onDiscard: () => void;
+}) {
+  if (count === 0) {
+    return null;
+  }
+  return (
+    <>
+      <span className="unsaved-note">{count} unsaved</span>
+      <button
+        type="button"
+        className="secondary"
+        disabled={disabled}
+        onClick={onDiscard}
+      >
+        Discard
+      </button>
+    </>
+  );
+}
+
 /**
  * One feature: a switch, the server it dials, and one button.
  *
@@ -137,7 +169,8 @@ export function FeatureEditor({
   children?: React.ReactNode;
 }) {
   const stored = draftOf(feature);
-  const [draft, setDraft] = useState<FeatureDraft>(stored);
+  const draft = useDraft(path, stored, SECRET);
+  const value = draft.value;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [probe, setProbe] = useState<string | null>(null);
@@ -145,14 +178,16 @@ export function FeatureEditor({
 
   // Where the position shown comes from: this level, or one above it. The
   // API resolves that; without it, an unset field is simply unset.
-  const inherited = draft.enabled === null;
-  const shown = draft.enabled ?? settled?.enabled ?? false;
+  const inherited = value.enabled === null;
+  const shown = value.enabled ?? settled?.enabled ?? false;
   const above = settled?.inherited;
   const placeholder = (field: Placed): string =>
     inherits(
       above?.[field] ?? settled?.[field],
       above?.origins[field] ?? settled?.origins[field],
     );
+  const mark = (field: keyof FeatureDraft, base?: string) =>
+    unsaved(base, draft.isDirty(field));
   // Below the global level the switch is refused only when the feature is
   // disabled outright. A global default of off is not that: a project may
   // say otherwise, which is the whole point of it being a default.
@@ -160,8 +195,8 @@ export function FeatureEditor({
   const untested =
     withUrl &&
     probePath !== undefined &&
-    draft.url.trim() !== "" &&
-    draft.url.trim() !== stored.url &&
+    value.url.trim() !== "" &&
+    value.url.trim() !== stored.url &&
     !tested;
 
   /** Say nothing at this level at all, which is what clears the stored key.
@@ -174,7 +209,7 @@ export function FeatureEditor({
     setError(null);
     try {
       await put(path, {});
-      setDraft(EMPTY);
+      draft.discard();
       setTested(false);
       onSaved();
     } catch (reason: unknown) {
@@ -184,12 +219,12 @@ export function FeatureEditor({
     }
   }
 
-  async function save(value: FeatureDraft) {
+  async function save() {
     setBusy(true);
     setError(null);
     try {
       await put(path, bodyOf(value));
-      setDraft(value);
+      draft.commit();
       setTested(false);
       onSaved();
     } catch (reason: unknown) {
@@ -214,7 +249,7 @@ export function FeatureEditor({
         detail?: string;
         fell_back?: boolean;
         skipped?: string[];
-      }>(probePath, { url: draft.url.trim(), key: draft.key.trim() });
+      }>(probePath, { url: value.url.trim(), key: value.key.trim() });
       setTested(answer.ok);
       setProbe(
         answer.ok
@@ -246,46 +281,50 @@ export function FeatureEditor({
             One field could not be both: turning a feature off by default
             would also have forbidden a project from turning itself on. */}
         {root && (
-          <Switch
-            checked={draft.allowed}
-            label={draft.allowed ? "enabled" : "disabled"}
-            title="whether this feature may run at all, for any project"
-            onChange={(checked) => setDraft({ ...draft, allowed: checked })}
-          />
+          <span className={mark("allowed")}>
+            <Switch
+              checked={value.allowed}
+              label={value.allowed ? "enabled" : "disabled"}
+              title="whether this feature may run at all, for any project"
+              onChange={(checked) => draft.update({ allowed: checked })}
+            />
+          </span>
         )}
-        <Switch
-          checked={shown}
-          inherited={inherited && !root}
-          disabled={gated}
-          label={
-            gated
-              ? "disabled globally"
-              : inherited && !root
-                ? `inherited from ${settled?.origins.enabled ?? "above"}: ${shown ? "on" : "off"}`
-                : `status: ${shown ? "on" : "off"}`
-          }
-          title={
-            gated
-              ? "the feature is disabled, so this level is not asked at all"
-              : root
-                ? "what a project that says nothing about itself does"
-                : undefined
-          }
-          onChange={(checked) => setDraft({ ...draft, enabled: checked })}
-        />
+        <span className={mark("enabled")}>
+          <Switch
+            checked={shown}
+            inherited={inherited && !root}
+            disabled={gated}
+            label={
+              gated
+                ? "disabled globally"
+                : inherited && !root
+                  ? `inherited from ${settled?.origins.enabled ?? "above"}: ${shown ? "on" : "off"}`
+                  : `status: ${shown ? "on" : "off"}`
+            }
+            title={
+              gated
+                ? "the feature is disabled, so this level is not asked at all"
+                : root
+                  ? "what a project that says nothing about itself does"
+                  : undefined
+            }
+            onChange={(checked) => draft.update({ enabled: checked })}
+          />
+        </span>
         {children}
         {withUrl && (
           <input
             type="password"
             aria-label="Server token"
             autoComplete="new-password"
-            className="token"
+            className={mark("key", "token")}
             placeholder="token, if the server wants one"
-            value={draft.key}
+            value={value.key}
             onChange={(event) => {
               setTested(false);
               setProbe(null);
-              setDraft({ ...draft, key: event.target.value });
+              draft.update({ key: event.target.value });
             }}
           />
         )}
@@ -293,23 +332,24 @@ export function FeatureEditor({
           <input
             type="text"
             aria-label="Server URL"
+            className={mark("url")}
             placeholder={
               root && !above?.server_url
                 ? "server URL, or the one in the environment"
                 : placeholder("server_url")
             }
-            value={draft.url}
+            value={value.url}
             onChange={(event) => {
               setTested(false);
               setProbe(null);
-              setDraft({ ...draft, url: event.target.value });
+              draft.update({ url: event.target.value });
             }}
           />
         )}
         <button
           type="button"
           disabled={busy}
-          onClick={() => void (untested ? test() : save(draft))}
+          onClick={() => void (untested ? test() : save())}
         >
           {untested ? "Test" : "Save"}
         </button>
@@ -328,6 +368,15 @@ export function FeatureEditor({
             Inherit
           </button>
         )}
+        <UnsavedNote
+          count={draft.dirtyCount}
+          disabled={busy}
+          onDiscard={() => {
+            draft.discard();
+            setTested(false);
+            setProbe(null);
+          }}
+        />
       </div>
       {/* The pace, under the row rather than in it: it is read far less
           often than the switch, and the row is already three controls wide.
@@ -341,11 +390,10 @@ export function FeatureEditor({
             type="number"
             min={1}
             max={64}
+            className={mark("batch")}
             placeholder={placeholder("batch")}
-            value={draft.batch}
-            onChange={(event) =>
-              setDraft({ ...draft, batch: event.target.value })
-            }
+            value={value.batch}
+            onChange={(event) => draft.update({ batch: event.target.value })}
           />
         </label>
         {root && (
@@ -355,11 +403,10 @@ export function FeatureEditor({
               type="number"
               min={1}
               max={3600}
+              className={mark("tick")}
               placeholder={placeholder("tick_seconds")}
-              value={draft.tick}
-              onChange={(event) =>
-                setDraft({ ...draft, tick: event.target.value })
-              }
+              value={value.tick}
+              onChange={(event) => draft.update({ tick: event.target.value })}
             />
           </label>
         )}
@@ -369,10 +416,11 @@ export function FeatureEditor({
             type="number"
             min={200}
             max={20000}
+            className={mark("chunkChars")}
             placeholder={placeholder("chunk_chars")}
-            value={draft.chunkChars}
+            value={value.chunkChars}
             onChange={(event) =>
-              setDraft({ ...draft, chunkChars: event.target.value })
+              draft.update({ chunkChars: event.target.value })
             }
           />
         </label>
@@ -382,10 +430,11 @@ export function FeatureEditor({
             type="number"
             min={0}
             max={200}
+            className={mark("chunkOverlap")}
             placeholder={placeholder("chunk_overlap")}
-            value={draft.chunkOverlap}
+            value={value.chunkOverlap}
             onChange={(event) =>
-              setDraft({ ...draft, chunkOverlap: event.target.value })
+              draft.update({ chunkOverlap: event.target.value })
             }
           />
         </label>
@@ -396,11 +445,10 @@ export function FeatureEditor({
               type="number"
               min={5}
               max={3600}
+              className={mark("budget")}
               placeholder={placeholder("budget_seconds")}
-              value={draft.budget}
-              onChange={(event) =>
-                setDraft({ ...draft, budget: event.target.value })
-              }
+              value={value.budget}
+              onChange={(event) => draft.update({ budget: event.target.value })}
             />
           </label>
         )}

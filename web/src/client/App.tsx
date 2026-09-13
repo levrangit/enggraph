@@ -1,6 +1,7 @@
 import { Link, NavLink, Route, Routes } from "react-router";
 
 import { Empty } from "./components/Common.js";
+import { QueueLamps } from "./components/StatusLamps.js";
 import { MemoriesPage } from "./pages/MemoriesPage.js";
 import { MemoryPage } from "./pages/MemoryPage.js";
 import { PlanPage } from "./pages/PlanPage.js";
@@ -29,6 +30,7 @@ export function App() {
           <NavLink to="/queues">Queues</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>
+        <QueueLamps />
       </header>
       <main>
         <Routes>
