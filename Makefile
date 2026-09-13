@@ -427,12 +427,14 @@ clean: require-env  ## Remove the containers, the database and the built images
 # where it is being installed: Claude Code reads .claude/skills/ of the project
 # root, and this repository is not that root when a neighbouring codebase is
 # the one being onboarded. That is AGENT_ROOT, and it is the only variable
-# these targets take.
+# these targets take. It defaults to the directory make was called from, so
+# `make -C` here from inside a codebase onboards that codebase.
 #
 # The installed copy is a plain copy. Gemini is linked to that same copy, so
 # both agents read one file and skills/ stays the source of truth - editing a
 # source still needs a reinstall for the copy to catch up.
-AGENT_ROOT ?= $(CURDIR)
+# -C moves CURDIR but leaves PWD naming the caller's directory.
+AGENT_ROOT ?= $(or $(realpath $(PWD)),$(CURDIR))
 SKILLS := $(sort $(notdir $(patsubst %/SKILL.md,%,$(wildcard skills/*/SKILL.md))))
 SKILL_BASE := $(AGENT_ROOT)/.claude/skills
 

@@ -208,6 +208,10 @@ make -C /path/to/enggraph install AGENT_ROOT=/home/you/work/api
 make -C /path/to/enggraph install AGENT_ROOT=/home/you/work/infra
 ```
 
+`AGENT_ROOT` defaults to the directory `make` is called from, so a bare
+`make -C /path/to/enggraph install` run inside a codebase onboards that
+codebase.
+
 A re-index is authoritative: it reports how many files it selected and how many
 of them a node was written for, and names the ones it had to leave out. Both
 producers skip a file whose content has not changed since the last run, so a

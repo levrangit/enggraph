@@ -40,7 +40,10 @@ nav_order: 2
 
    This registers the project and mounts its tree; it does not build the
    graph. The dashboard lists it as `never indexed` with an Index button
-   beside it, and that button is what indexes it.
+   beside it, and that button is what indexes it. `AGENT_ROOT` defaults to
+   the directory `make` is called from, so
+   `make -C /path/to/enggraph install` run inside the codebase needs no
+   `AGENT_ROOT` at all.
 
 ## Adding new codebases
 
