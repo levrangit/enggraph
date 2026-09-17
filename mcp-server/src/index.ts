@@ -14,6 +14,8 @@ import type {
 import express from "express";
 import type { Request, Response } from "express";
 import pg from "pg";
+import { rerank } from "./rerank.js";
+import type { Candidate } from "./rerank.js";
 
 const { Pool } = pg;
 const dbPool = new Pool({
@@ -352,8 +354,9 @@ const listToolsHandler = async (
           '("where is the retry logic") is answered from the text of the ' +
           "indexed files, ranked together with the identifier matches " +
           "search_code_nodes makes. Answers with the file and the line range " +
-          "to read. Reach for search_code_nodes instead when the exact name " +
-          "of a symbol is already known",
+          "to read. Results are reranked by exact identifier, path, node " +
+          "type and graph links. Reach for search_code_nodes instead when " +
+          "the exact name of a symbol is already known",
         inputSchema: {
           type: "object",
           properties: {
@@ -377,6 +380,12 @@ const listToolsHandler = async (
             limit: {
               type: "number",
               description: `Maximum rows to return (default ${DEFAULT_RESULTS}, max ${MAX_RESULTS})`,
+            },
+            rerank: {
+              type: "boolean",
+              description:
+                "Rerank the fused candidates (default true). false returns " +
+                "the plain reciprocal rank fusion order, for comparison",
             },
           },
           required: ["query"],
@@ -863,6 +872,13 @@ async function embedQuery(
     return null;
   }
 }
+
+type SearchRow = Candidate & {
+  start_line: number | null;
+  end_line: number | null;
+  summary: string | null;
+  snippet: string | null;
+};
 
 /** Render a vector the way pgvector parses it. */
 function vectorLiteral(vector: number[]): string {
@@ -2214,15 +2230,25 @@ function makeCallToolHandler(
         // found. Deeper than the limit on purpose: fusion is only meaningful
         // where the lists overlap.
         const depth = Math.max(limit * 3, 50);
+        // Several chunks of one file fold into one row, so chunks go deeper.
+        const chunkDepth = depth * 4;
         const vector = await embedQuery(query, named);
         const literal = vector === null ? null : vectorLiteral(vector);
+        const useRerank = args?.rerank !== false;
 
-        const res = await dbPool.query(
-          // Reciprocal rank fusion: each half contributes 1/(60 + rank), so
-          // the lists are combined by agreement rather than by scores that
-          // mean different things - a cosine distance and a trigram
-          // similarity are not comparable numbers.
-          `WITH scope AS (
+        // HNSW stops at ef_search rows before the scope filter runs; an
+        // iterative scan keeps reading until the chunk depth is met in scope.
+        const client = await dbPool.connect();
+        let pool: SearchRow[];
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL hnsw.iterative_scan = relaxed_order");
+          const res = await client.query<SearchRow>(
+            // Reciprocal rank fusion: each half contributes 1/(60 + rank), so
+            // the lists are combined by agreement rather than by scores that
+            // mean different things - a cosine distance and a trigram
+            // similarity are not comparable numbers.
+            `WITH scope AS (
              SELECT p.name, p.type FROM projects AS p
               WHERE ($1::text IS NULL
                      OR p.name = $1
@@ -2290,7 +2316,7 @@ function makeCallToolHandler(
                JOIN scope AS s ON s.name = e.project
               WHERE $5::text IS NOT NULL AND e.embedding IS NOT NULL
               ORDER BY e.embedding <=> $5::vector
-              LIMIT $6
+              LIMIT $7
            ),
            vector_ranked AS (
              SELECT project, id, start_line, end_line, snippet,
@@ -2323,27 +2349,55 @@ function makeCallToolHandler(
            )
            SELECT n.project, s.type AS project_type, n.id, n.name, n.type,
                   n.file_path, r.start_line, r.end_line,
-                  ROUND(r.score::numeric, 5) AS score,
-                  r.lexical_rank, r.vector_rank, n.summary,
-                  LEFT(r.snippet, 400) AS snippet
+                  r.score::float8 AS rrf,
+                  r.lexical_rank::int AS lexical_rank,
+                  r.vector_rank::int AS vector_rank, n.summary,
+                  LEFT(r.snippet, 400) AS snippet,
+                  (SELECT COUNT(*)::int
+                     FROM graph_edges AS g
+                     JOIN graph_nodes AS src
+                       ON src.project = g.project AND src.id = g.source_id
+                    WHERE g.project = n.project AND g.target_id = n.id
+                      AND g.relation_type <> 'contains'
+                      AND NOT starts_with(src.type, 'external_')
+                  ) AS in_degree
              FROM ranked AS r
              JOIN graph_nodes AS n
                ON n.project = r.project AND n.id = r.id
              JOIN scope AS s ON s.name = n.project
-            ORDER BY r.rn, r.score DESC, n.id
-            LIMIT $7`,
-          [named, kind, pattern, query, literal, depth, limit],
-        );
+            WHERE r.rn <= $6`,
+            [named, kind, pattern, query, literal, depth, chunkDepth],
+          );
+          await client.query("COMMIT");
+          pool = res.rows;
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => undefined);
+          throw error;
+        } finally {
+          client.release();
+        }
 
+        const ranked = rerank(pool, query, limit, useRerank);
         // The project columns are noise when every row carries the same two
         // values, exactly as in search_code_nodes.
-        const spread = new Set(res.rows.map((row) => row.project)).size > 1;
-        const rows =
-          named === null || spread
-            ? res.rows
-            : res.rows.map(
-                ({ project: _p, project_type: _t, ...rest }) => rest,
-              );
+        const spread = new Set(ranked.map(({ row }) => row.project)).size > 1;
+        const rows = ranked.map(({ row, score }) => ({
+          ...(named === null || spread
+            ? { project: row.project, project_type: row.project_type }
+            : {}),
+          id: row.id,
+          name: row.name,
+          type: row.type,
+          file_path: row.file_path,
+          start_line: row.start_line,
+          end_line: row.end_line,
+          score: Number(score.toFixed(5)),
+          rrf: Number(row.rrf.toFixed(5)),
+          lexical_rank: row.lexical_rank,
+          vector_rank: row.vector_rank,
+          summary: row.summary,
+          snippet: row.snippet,
+        }));
 
         // Saying which halves answered is not decoration: a lexical-only
         // answer to a question asked in words is a weaker answer, and the
@@ -2354,7 +2408,7 @@ function makeCallToolHandler(
               "these are lexical matches only. `search_code` gains the " +
               "vector half once embedding is switched on for the project in " +
               "the dashboard settings and its queue has drained."
-            : res.rows.some((row) => row.vector_rank !== null)
+            : pool.some((row) => row.vector_rank !== null)
               ? null
               : "Semantic half returned nothing: this project has no " +
                 "embeddings yet, so these are lexical matches only.";

@@ -91,9 +91,12 @@ Adding vector context and agent memory.
       queue does nothing until embedding is switched on: the switch is stored
       beside the schedule, at the same three levels, and off at the global
       level is a gate rather than a default.
-- [ ] **Reranking:** a stage between the fused candidates and the answer -
-      symbol type, path relevance, graph centrality - so the ranking is about
-      code rather than about text.
+- [x] **Reranking:** a heuristic stage between the fused candidates and the
+      answer - exact identifier, path, node type, candidates of the same file
+      and incoming non-`contains` edges - so the ranking is about code rather
+      than about text. `rerank: false` returns the plain fusion order. The
+      vector half scans HNSW iteratively, so a scoped search is no longer cut
+      to the rows the index returned before the project filter.
 
 ## Integrations
 

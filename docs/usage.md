@@ -82,6 +82,11 @@ to open rather than a node id to look up further. The two halves are ranked
 separately and combined, which is why a file both halves found outranks one
 that only the vector half did.
 
+The combined list is then reranked: a node whose name is a word of the query,
+a path that shares words with it, and code rather than a documentation heading
+move up. `rerank: false` returns the combined order untouched, which is how a
+ranking is compared against it.
+
 The vector half needs the files embedded. Nothing is embedded until embedding
 is switched on for the project in the dashboard settings, and until then
 `search_code` answers with its lexical half alone and says so in the reply.
