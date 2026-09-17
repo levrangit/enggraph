@@ -3,8 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { patch, post, query } from "../api.js";
 import { Empty, ErrorBox, Pager, Spinner } from "../components/Common.js";
-import { Picker } from "../components/Picker.js";
-import type { PickerEntry } from "../components/Picker.js";
+import { Picker, projectEntries } from "../components/Picker.js";
 import { useApi, useDebounced } from "../hooks/useApi.js";
 import type { Page, PlanFacets, PlanRow, PlanTarget } from "../types.js";
 
@@ -205,49 +204,6 @@ export function PlansPage() {
       )}
     </>
   );
-}
-
-/** Organizations with their members, then the projects in none of them. */
-function projectEntries(
-  targets: PlanTarget[],
-  tagged: string[] = [],
-): PickerEntry[] {
-  const known = new Set(targets.map((target) => target.name));
-  const entries: PickerEntry[] = [];
-  for (const organization of targets) {
-    if (organization.type !== "organization") {
-      continue;
-    }
-    entries.push({
-      value: organization.name,
-      label: `${organization.name}, whole organization`,
-      group: organization.name,
-    });
-    for (const member of targets) {
-      if (member.organizations.includes(organization.name)) {
-        entries.push({
-          value: member.name,
-          label: member.name,
-          group: organization.name,
-        });
-      }
-    }
-  }
-  for (const target of targets) {
-    if (target.type !== "organization" && target.organizations.length === 0) {
-      entries.push({
-        value: target.name,
-        label: target.name,
-        group: "Projects",
-      });
-    }
-  }
-  for (const name of tagged) {
-    if (!known.has(name)) {
-      entries.push({ value: name, label: name, group: "No longer a project" });
-    }
-  }
-  return entries;
 }
 
 function NewPlan({

@@ -3,17 +3,23 @@ import { Link, useNavigate, useParams } from "react-router";
 
 import { patch, query, remove } from "../api.js";
 import { ErrorBox, Markdown, Spinner } from "../components/Common.js";
+import { ConfirmModal } from "../components/ConfirmModal.js";
+import { Picker, projectEntries } from "../components/Picker.js";
 import { useApi } from "../hooks/useApi.js";
-import type { Plan } from "../types.js";
+import type { Plan, PlanFacets } from "../types.js";
+
+const GLOBAL_LABEL = "global, listed under every project";
 
 export function PlanPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const plan = useApi<Plan>(`/plan${query({ id })}`);
+  const facets = useApi<PlanFacets>("/plans/facets");
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [moving, setMoving] = useState<string | null>(null);
 
   useEffect(() => {
     if (plan.data !== null) {
@@ -48,6 +54,10 @@ export function PlanPage() {
     return <Spinner what="the plan" />;
   }
 
+  const current = plan.data.project;
+  const from = current ?? "global";
+  const to = moving === "" ? "global" : moving;
+
   return (
     <>
       <p>
@@ -57,7 +67,19 @@ export function PlanPage() {
       <p className="muted id">{plan.data.id}</p>
       <dl className="inline">
         <dt>Project</dt>
-        <dd>{plan.data.project ?? "global"}</dd>
+        <dd>
+          <Picker
+            value={current ?? ""}
+            onChange={setMoving}
+            entries={[
+              { value: "", label: GLOBAL_LABEL },
+              ...projectEntries(
+                facets.data?.targets ?? [],
+                current === null ? [] : [current],
+              ),
+            ]}
+          />
+        </dd>
         <dt>Type</dt>
         <dd>{plan.data.type}</dd>
         <dt>Status</dt>
@@ -90,6 +112,36 @@ export function PlanPage() {
         />
       ) : (
         <Markdown text={plan.data.content} />
+      )}
+
+      {moving !== null && (
+        <ConfirmModal
+          title={`Move ${plan.data.id} to ${to}`}
+          confirmLabel="Move it"
+          onClose={() => setMoving(null)}
+          onConfirm={async () => {
+            await patch(`/plan${query({ id })}`, { project: moving });
+            setMoving(null);
+            plan.reload();
+          }}
+        >
+          <p>
+            The plan moves from {from} to {to}. Its id, title, content, type and
+            status stay as they are.
+          </p>
+          <ul>
+            <li>
+              {current === null
+                ? "It stops being listed under every project."
+                : `get_plans for ${current} stops listing it.`}
+            </li>
+            <li>
+              {moving === ""
+                ? "It is listed under every project, as a global plan."
+                : `get_plans for ${moving} starts listing it.`}
+            </li>
+          </ul>
+        </ConfirmModal>
       )}
     </>
   );
