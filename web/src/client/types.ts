@@ -406,11 +406,18 @@ export type PlanRow = {
 
 export type Plan = Omit<PlanRow, "content_length"> & { content: string };
 
+export type PlanTarget = {
+  name: string;
+  type: string;
+  organizations: string[];
+};
+
 export type PlanFacets = {
   projects: string[];
   statuses: string[];
   types: string[];
   global_plans: number;
+  targets: PlanTarget[];
 };
 
 export type Page<T> = {

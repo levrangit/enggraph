@@ -73,18 +73,24 @@ plansRouter.get(
 plansRouter.get(
   "/plans/facets",
   route(async (_req, res) => {
-    const rows = await dbPool.query<{
-      projects: string[] | null;
-      statuses: string[] | null;
-      types: string[] | null;
-      global_plans: string;
-    }>(sql.PLAN_FACETS);
+    const [rows, targets] = await Promise.all([
+      dbPool.query<{
+        projects: string[] | null;
+        statuses: string[] | null;
+        types: string[] | null;
+        global_plans: string;
+      }>(sql.PLAN_FACETS),
+      dbPool.query<{ name: string; type: string; organizations: string[] }>(
+        sql.PLAN_TARGETS,
+      ),
+    ]);
     const row = rows.rows[0];
     res.json({
       projects: (row.projects ?? []).sort(),
       statuses: (row.statuses ?? []).sort(),
       types: (row.types ?? []).sort(),
       global_plans: count(row.global_plans),
+      targets: targets.rows,
     });
   }),
 );

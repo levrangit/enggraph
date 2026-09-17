@@ -327,6 +327,19 @@ export const PLAN_FACETS = `
       WHERE project = '_plans'
         AND metadata ->> 'about' IS NULL) AS global_plans`;
 
+export const PLAN_TARGETS = `
+  SELECT p.name, p.type,
+         COALESCE(
+           array_agg(m.organization ORDER BY m.organization)
+             FILTER (WHERE m.organization IS NOT NULL),
+           '{}'
+         ) AS organizations
+    FROM projects AS p
+    LEFT JOIN project_members AS m ON m.project = p.name
+   WHERE left(p.name, 1) <> '_'
+   GROUP BY p.name, p.type
+   ORDER BY p.name`;
+
 export const PLAN = `
   SELECT id,
          metadata ->> 'about' AS project,

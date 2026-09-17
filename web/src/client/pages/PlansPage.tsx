@@ -3,8 +3,10 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { patch, post, query } from "../api.js";
 import { Empty, ErrorBox, Pager, Spinner } from "../components/Common.js";
+import { Picker } from "../components/Picker.js";
+import type { PickerEntry } from "../components/Picker.js";
 import { useApi, useDebounced } from "../hooks/useApi.js";
-import type { Page, PlanFacets, PlanRow } from "../types.js";
+import type { Page, PlanFacets, PlanRow, PlanTarget } from "../types.js";
 
 const PAGE = 50;
 const ALL = "*";
@@ -64,20 +66,21 @@ export function PlansPage() {
       <div className="filters">
         <label>
           Project
-          <select
+          <Picker
             value={project}
-            onChange={(event) => setParam("project", event.target.value)}
-          >
-            <option value={ALL}>every project</option>
-            <option value={GLOBAL}>
-              global ({facets.data?.global_plans ?? 0})
-            </option>
-            {(facets.data?.projects ?? []).map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => setParam("project", value)}
+            entries={[
+              { value: ALL, label: "every project" },
+              {
+                value: GLOBAL,
+                label: `global (${facets.data?.global_plans ?? 0})`,
+              },
+              ...projectEntries(
+                facets.data?.targets ?? [],
+                facets.data?.projects ?? [],
+              ),
+            ]}
+          />
         </label>
         <label>
           Status
@@ -196,7 +199,7 @@ export function PlansPage() {
 
       {creating && (
         <NewPlan
-          projects={facets.data?.projects ?? []}
+          targets={facets.data?.targets ?? []}
           onClose={() => setCreating(false)}
         />
       )}
@@ -204,11 +207,54 @@ export function PlansPage() {
   );
 }
 
+/** Organizations with their members, then the projects in none of them. */
+function projectEntries(
+  targets: PlanTarget[],
+  tagged: string[] = [],
+): PickerEntry[] {
+  const known = new Set(targets.map((target) => target.name));
+  const entries: PickerEntry[] = [];
+  for (const organization of targets) {
+    if (organization.type !== "organization") {
+      continue;
+    }
+    entries.push({
+      value: organization.name,
+      label: `${organization.name}, whole organization`,
+      group: organization.name,
+    });
+    for (const member of targets) {
+      if (member.organizations.includes(organization.name)) {
+        entries.push({
+          value: member.name,
+          label: member.name,
+          group: organization.name,
+        });
+      }
+    }
+  }
+  for (const target of targets) {
+    if (target.type !== "organization" && target.organizations.length === 0) {
+      entries.push({
+        value: target.name,
+        label: target.name,
+        group: "Projects",
+      });
+    }
+  }
+  for (const name of tagged) {
+    if (!known.has(name)) {
+      entries.push({ value: name, label: name, group: "No longer a project" });
+    }
+  }
+  return entries;
+}
+
 function NewPlan({
-  projects,
+  targets,
   onClose,
 }: {
-  projects: string[];
+  targets: PlanTarget[];
   onClose: () => void;
 }) {
   const navigate = useNavigate();
@@ -252,17 +298,14 @@ function NewPlan({
         </label>
         <label>
           Project
-          <select
+          <Picker
             value={project}
-            onChange={(event) => setProject(event.target.value)}
-          >
-            <option value="">global, listed under every project</option>
-            {projects.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+            onChange={setProject}
+            entries={[
+              { value: "", label: "global, listed under every project" },
+              ...projectEntries(targets),
+            ]}
+          />
         </label>
         <label>
           Type

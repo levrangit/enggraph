@@ -896,3 +896,57 @@ button.icon-button {
   overflow: auto;
   font-size: 0.8rem;
 }
+
+/* A native select list cannot be bounded to the window, so long lists use
+   this one instead. */
+.picker-trigger {
+  min-width: 12rem;
+  text-align: left;
+}
+
+.picker-panel {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+}
+
+.picker-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.picker-group {
+  padding: 0.35rem 0.5rem 0.1rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.picker-option {
+  display: block;
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  text-align: left;
+}
+
+.picker-option.nested {
+  padding-left: 1.25rem;
+}
+
+.picker-option:hover,
+.picker-option:focus-visible {
+  background: var(--bg);
+}
+
+.picker-option[aria-selected="true"] {
+  color: var(--accent);
+}
