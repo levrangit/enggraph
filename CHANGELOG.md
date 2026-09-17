@@ -1,3 +1,20 @@
+## v0.19.0 (2026-09-17)
+
+### Features
+
+- **mcp**: search_code reranks the fused candidates before it answers
+- **graphify**: each queue's server says whether it answered, per project
+
+### Bug Fixes
+
+- **web**: a plan can be moved to another project, once confirmed
+- **web**: a plan can be made for any project, from a list that scrolls
+- **base**: make -C install onboards the directory make was called from
+- **web**: settings keep what was typed, and lamps show whether a queue answers
+- **base**: no real names in tests, docs or examples
+- **base**: a failed enqueue or a spent task no longer wedges a queue
+- **base**: queues that drain per server, skip what fails and say so
+
 ## v0.18.0 (2026-09-10)
 
 ### Features
