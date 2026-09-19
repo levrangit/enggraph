@@ -1,173 +1,173 @@
-# Enggraph auto-update on Mini PC
+# Автообновление Enggraph на Mini PC
 
-## Purpose
+## Назначение
 
-The Enggraph installation on the Mini PC (`leosrv`) is configured to check for new Docker images once every 24 hours and automatically apply them.
+Установка Enggraph на Mini PC (`leosrv`) настроена на проверку новых Docker-образов один раз в 24 часа и их автоматическое применение.
 
-The upstream project is:
+Upstream-проект:
 
 - https://github.com/oberon-systems/enggraph
 
-The deployed Docker images come from GitHub Container Registry (GHCR), using the upstream `latest` images.
+Используемые Docker-образы загружаются из GitHub Container Registry (GHCR), из upstream-репозитория, с тегом `latest`.
 
-## Mini PC deployment
+## Установка на Mini PC
 
-Project directory:
+Каталог проекта:
 
 `/opt/levrangit/enggraph`
 
-Local configuration is stored in:
+Локальная конфигурация хранится в:
 
 `/opt/levrangit/enggraph/.env`
 
-The `.env` file is local and contains deployment-specific configuration and secrets. The automatic update mechanism does **not** modify or replace this file.
+Файл `.env` является локальным и содержит настройки конкретной установки и секреты. Механизм автообновления **не изменяет и не заменяет** этот файл.
 
-The PostgreSQL data is kept in the Docker volume and is not deleted by the update process.
+Данные PostgreSQL хранятся в Docker volume и не удаляются в процессе обновления.
 
-Caddy is installed and managed separately by systemd and is not modified by the Enggraph update process.
+Caddy установлен и управляется отдельно через systemd. Механизм обновления Enggraph его не изменяет.
 
-## Update script
+## Скрипт обновления
 
-The update script is:
+Скрипт обновления:
 
 `/usr/local/sbin/enggraph-update.sh`
 
-It performs:
+Он выполняет:
 
-1. Changes to `/opt/levrangit/enggraph`.
-2. Runs `docker compose pull` to check/pull newer Docker images.
-3. Runs `docker compose up -d`.
-4. Writes the result to:
+1. Переходит в каталог `/opt/levrangit/enggraph`.
+2. Запускает `docker compose pull` для проверки и загрузки новых Docker-образов.
+3. Запускает `docker compose up -d`.
+4. Записывает результат в:
    `/opt/levrangit/enggraph/enggraph-update.log`
 
-If an image has changed, Docker Compose recreates the affected container automatically. For example, if the `mcp-server` image is updated, the old `mcp-server` container is replaced with a container using the new image and started automatically.
+Если образ изменился, Docker Compose автоматически пересоздаёт соответствующий контейнер. Например, если обновился образ `mcp-server`, старый контейнер `mcp-server` заменяется контейнером с новым образом и автоматически запускается.
 
-If there are no new images, the existing containers remain running.
+Если новых образов нет, существующие контейнеры продолжают работать.
 
-## systemd service
+## Сервис systemd
 
-The service is:
+Сервис:
 
 `enggraph-update.service`
 
-It runs:
+Он запускает:
 
 `/usr/local/sbin/enggraph-update.sh`
 
-The service uses:
+Сервис использует:
 
 `User=leo`
 
-and:
+и:
 
 `WorkingDirectory=/opt/levrangit/enggraph`
 
-It is a `Type=oneshot` service, so `inactive (dead)` after a successful run is normal. A successful execution has:
+Это сервис типа `Type=oneshot`, поэтому после успешного выполнения состояние `inactive (dead)` является нормальным. Успешное выполнение имеет:
 
 `status=0/SUCCESS`
 
-## systemd timer
+## Таймер systemd
 
-The timer is:
+Таймер:
 
 `enggraph-update.timer`
 
-Current schedule:
+Текущее расписание:
 
-- first run: 10 minutes after boot
-- subsequent runs: every 24 hours
-- `Persistent=true`: if the Mini PC was powered off when a scheduled run was missed, systemd can run the missed timer after the machine comes back online.
+- первый запуск: через 10 минут после загрузки Mini PC;
+- последующие запуски: каждые 24 часа;
+- `Persistent=true`: если Mini PC был выключен в момент запланированного запуска, systemd может выполнить пропущенную проверку после включения компьютера.
 
-The timer is enabled and should normally show:
+Таймер включён и в нормальном состоянии должен показывать:
 
 `Active: active (waiting)`
 
-To inspect it:
+Проверка:
 
 ```bash
 systemctl status enggraph-update.timer --no-pager
 systemctl list-timers enggraph-update.timer --no-pager
 ```
 
-## Manual update
+## Ручное обновление
 
-To run the update immediately:
+Чтобы немедленно запустить обновление:
 
 ```bash
 sudo systemctl start enggraph-update.service
 ```
 
-Then check:
+Затем проверить:
 
 ```bash
 systemctl status enggraph-update.service --no-pager
 ```
 
-A successful oneshot service normally returns to `inactive (dead)` with `status=0/SUCCESS`.
+После успешного запуска oneshot-сервис обычно возвращается в состояние `inactive (dead)` с результатом `status=0/SUCCESS`.
 
-## Update log
+## Журнал обновлений
 
-The latest update activity is recorded in:
+Последние операции обновления записываются в:
 
 `/opt/levrangit/enggraph/enggraph-update.log`
 
-View recent entries:
+Посмотреть последние записи:
 
 ```bash
 tail -50 /opt/levrangit/enggraph/enggraph-update.log
 ```
 
-## Important architecture detail
+## Важная особенность архитектуры
 
-The Mini PC does **not** perform a blind `git pull` for runtime updates.
+Mini PC **не выполняет слепой `git pull` для обновления работающего Enggraph**.
 
-Runtime updates are based on Docker images published by the upstream Enggraph project. This is intentional:
+Обновление работающей установки выполняется через Docker-образы, опубликованные upstream-проектом Enggraph. Это сделано намеренно:
 
-- local `.env` remains untouched;
-- local PostgreSQL data remains untouched;
-- local Caddy configuration remains untouched;
-- only Docker images/containers are updated;
-- the Mini PC follows the upstream published container releases.
+- локальный `.env` остаётся без изменений;
+- локальные данные PostgreSQL остаются без изменений;
+- локальная конфигурация Caddy остаётся без изменений;
+- обновляются только Docker-образы и соответствующие контейнеры;
+- Mini PC получает опубликованные upstream-релизы контейнеров.
 
-The upstream Enggraph Docker publishing workflow publishes images to GHCR on its release/tag workflow. Therefore a commit appearing in the upstream Git repository does not necessarily mean that a new `latest` Docker image is immediately available.
+Upstream workflow публикации Docker-образов отправляет образы в GHCR в рамках workflow релизов/тегов. Поэтому появление нового коммита в upstream Git-репозитории не обязательно означает немедленное появление нового Docker-образа `latest`.
 
-## Current public MCP endpoint
+## Текущий публичный MCP endpoint
 
-The deployed MCP endpoint is:
+Используемый MCP endpoint:
 
 `https://levranio.duckdns.org/mcp/enggraph`
 
-Traffic reaches the Mini PC through HTTPS/Caddy and then the local Enggraph gateway.
+Запросы приходят на Mini PC через HTTPS/Caddy, а затем передаются локальному шлюзу Enggraph.
 
-The update of `mcp-server` does not require a manual restart. When its Docker image changes, `docker compose up -d` automatically recreates and starts the new `mcp-server` container.
+Обновление `mcp-server` не требует ручного перезапуска. Если его Docker-образ изменился, команда `docker compose up -d` автоматически пересоздаёт и запускает новый контейнер `mcp-server`.
 
-## Recovery / troubleshooting
+## Восстановление и диагностика
 
-If the timer is not active:
+Если таймер не активен:
 
 ```bash
 sudo systemctl enable --now enggraph-update.timer
 ```
 
-If an update fails:
+Если обновление завершилось ошибкой:
 
 ```bash
 systemctl status enggraph-update.service --no-pager
 tail -100 /opt/levrangit/enggraph/enggraph-update.log
 ```
 
-Do not delete the PostgreSQL Docker volume as part of routine update troubleshooting.
+Не следует удалять Docker volume PostgreSQL в рамках обычной диагностики обновления.
 
-## Configuration created on the Mini PC
+## Конфигурация, созданная на Mini PC
 
-The automatic update consists of these systemd files:
+Автоматическое обновление состоит из следующих systemd-файлов:
 
 - `/usr/local/sbin/enggraph-update.sh`
 - `/etc/systemd/system/enggraph-update.service`
 - `/etc/systemd/system/enggraph-update.timer`
 
-These files are part of the Mini PC deployment configuration and are not automatically created by the upstream Enggraph repository.
+Эти файлы относятся к конфигурации развёртывания на Mini PC и автоматически не создаются upstream-репозиторием Enggraph.
 
-## Established policy
+## Принятое правило
 
-The intended update frequency is **once per day**, not every few minutes. This is sufficient because the upstream project publishes deployable Docker images through its release workflow rather than requiring the Mini PC to follow every source-code commit.
+Предусмотренная частота обновления — **один раз в сутки**, а не каждые несколько минут. Этого достаточно, поскольку upstream-проект публикует готовые Docker-образы через workflow релизов, а Mini PC не должен отслеживать каждый отдельный коммит исходного кода.
